@@ -1,0 +1,38 @@
+[server]
+port             = 4840
+endpoint_url     = "opc.tcp://0.0.0.0:4840"
+namespace_uri    = "http://opc-simulator.local/UA/"
+application_name = "OPC Simulator"
+
+[logging]
+level = "info"
+
+[[devices]]
+profile      = "MachineryDevice"
+name         = "AuxUnit-01"
+high_freq_ms = 250
+low_freq_ms  = 1000
+
+[[devices]]
+profile      = "IndustrialRobotArm"
+name         = "Robot-01"
+high_freq_ms = 250
+low_freq_ms  = 1000
+
+[[devices]]
+profile      = "SimpleLath"
+name         = "Lathe-01"
+high_freq_ms = 250
+low_freq_ms  = 1000
+
+[[devices]]
+profile      = "FiveAxisCNC"
+name         = "CNC-01"
+high_freq_ms = 250
+low_freq_ms  = 1000
+
+[[devices]]
+profile      = "HighSpeedMill"
+name         = "Mill-01"
+high_freq_ms = 250
+low_freq_ms  = 1000
