@@ -69,21 +69,16 @@ Good for Azure Cloud Shell or a fresh laptop. Pulls every script and
 the vendored helm chart from the repo:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/__GITHUB_ORG__/__GITHUB_REPO__/main/aio-tools/bootstrap.sh \
+curl -sSL https://raw.githubusercontent.com/vipeller/tools/main/aio-tools/bootstrap.sh \
      | bash
 cd aio-tools
 ```
 
-> The `__GITHUB_ORG__` / `__GITHUB_REPO__` strings are intentional
-> placeholders — replace them with the real repo coordinates once
-> the project is published. (They appear in `bootstrap.sh` and
-> `deploy_umati.sh`.)
-
 ### Option B — Clone the repo
 
 ```bash
-git clone <repo-url>
-cd <repo>/aio-tools
+git clone https://github.com/vipeller/tools.git
+cd https://github.com/vipeller/tools.git/aio-tools
 ```
 
 ### Then in either case:
