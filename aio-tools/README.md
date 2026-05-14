@@ -28,12 +28,6 @@ self-contained. They share a `common.sh` (logging, az login,
 kubectl wiring, ADR/AIO probes) and an `onboard_lib.sh` (the
 discoveredAsset → asset PUT contract).
 
-> Heritage: this directory is the OPC-Simulator-specific evolution
-> of the upstream toolset at
-> [`vipeller/aio_gp_test/aio-tools`](https://github.com/vipeller/aio_gp_test/tree/main/aio-tools).
-> Only the pieces relevant to OPC UA simulation are kept; everything
-> Fabric / dataflow / connector-template-related has been dropped.
-
 ---
 
 ## Prerequisites
