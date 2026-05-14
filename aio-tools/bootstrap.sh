@@ -62,6 +62,7 @@ DOCS=(
 
 # Vendored helm chart(s). Add new entries when we vendor more.
 CHARTS=(
+  "charts/opc-simulator-0.1.0.tgz"
   "charts/umati-sample-server-1.0-alpha.1-microsoft.1.tgz"
 )
 

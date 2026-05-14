@@ -28,6 +28,12 @@ self-contained. They share a `common.sh` (logging, az login,
 kubectl wiring, ADR/AIO probes) and an `onboard_lib.sh` (the
 discoveredAsset → asset PUT contract).
 
+> Heritage: this directory is the OPC-Simulator-specific evolution
+> of the upstream toolset at
+> [`vipeller/aio_gp_test/aio-tools`](https://github.com/vipeller/aio_gp_test/tree/main/aio-tools).
+> Only the pieces relevant to OPC UA simulation are kept; everything
+> Fabric / dataflow / connector-template-related has been dropped.
+
 ---
 
 ## Prerequisites
@@ -155,17 +161,22 @@ Idempotent helm install of one umati instance.
 ### `deploy_opc_simulator.sh [--image <ref>] [--release <name>] [--config <toml>] [--values <yaml>] [--chart <path>]`
 
 Idempotent helm install of one OPC-Simulator instance using the
-chart that lives at `OPC-Simulator/deploy/helm/opc-simulator`.
+vendored chart at `charts/opc-simulator-<version>.tgz` (a packaged
+copy of `OPC-Simulator/deploy/helm/opc-simulator`).
 
 * `--image` is **optional**. Defaults to
   `vipeller.azurecr.io/opc-simulator:0.1.0` (the pre-built artifact
   in the shared ACR). Override with the output of
   `OPC-Simulator/deploy/scripts/build-and-push.sh` when iterating on
   a local build.
-* The chart path defaults to `<this-script>/../../deploy/helm/opc-simulator`,
-  so the script "just works" while it lives inside the OPC-Simulator
-  repo. If you've copied this folder out of the repo, set
-  `OPC_SIMULATOR_CHART_PATH` (or pass `--chart`).
+* The chart resolution order is:
+  1. `--chart <path>` / `CHART_PATH` / `OPC_SIMULATOR_CHART_PATH`
+     (a chart directory or a `.tgz` both work).
+  2. The vendored `charts/opc-simulator-<version>.tgz` next to this
+     script (the `bootstrap.sh` default).
+  3. `<this-script>/../../deploy/helm/opc-simulator` — only used
+     when this folder runs from inside the OPC-Simulator repo and
+     you want to test chart edits without repackaging.
 * Pass a custom `simulator.toml` with `--config` (renders into the
   chart's `simulatorConfig` value via `--set-file`).
 * The resulting service name follows the chart's `fullname` rule:
@@ -255,7 +266,7 @@ deploy_opc_simulator.sh# helm install of this repo's opc-simulator chart
 register_device.sh     # PUT a Microsoft.DeviceRegistry/.../devices/<name>
 onboard_bulk.sh        # bulk onboard with --count + --timeout
 onboard_interactive.sh # interactive y/n onboard
-charts/                # vendored helm charts (umati fork)
+charts/                # vendored helm charts (opc-simulator + umati fork)
 README.md              # this file
 ```
 

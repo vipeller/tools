@@ -29,12 +29,15 @@
 #                                  release name already contains
 #                                  "opc-simulator". Pick accordingly.
 #   --namespace / NAMESPACE      K8s namespace (default: azure-iot-operations).
-#   --chart / CHART_PATH         Local path to the helm chart directory.
-#                                  Default: <repo>/deploy/helm/opc-simulator,
-#                                  resolved by walking up from this script
-#                                  if it lives inside the OPC-Simulator
-#                                  repo. Otherwise OPC_SIMULATOR_CHART_PATH
-#                                  must be set.
+#   --chart / CHART_PATH         Path to the helm chart. Resolution order:
+#                                  1. --chart / CHART_PATH explicit.
+#                                  2. <script-dir>/charts/<vendored .tgz>
+#                                     (the bootstrap.sh default).
+#                                  3. <repo>/deploy/helm/opc-simulator
+#                                     (only when this folder is run
+#                                     from inside the OPC-Simulator repo).
+#                                  Either a chart directory or a packaged
+#                                  .tgz is accepted.
 #   --values / VALUES_FILE       Optional helm values file passed via -f.
 #   --config / SIMULATOR_CONFIG  Path to a simulator.toml passed via
 #                                  --set-file simulatorConfig=...
@@ -59,6 +62,12 @@ NAMESPACE="${NAMESPACE:-azure-iot-operations}"
 # override via --image / IMAGE when iterating on a local build.
 DEFAULT_IMAGE="vipeller.azurecr.io/opc-simulator:0.1.0"
 IMAGE="${IMAGE:-$DEFAULT_IMAGE}"
+# Default chart: vendored .tgz next to this script (shipped by
+# bootstrap.sh). Override with --chart / CHART_PATH /
+# OPC_SIMULATOR_CHART_PATH to point at a chart directory or a
+# different .tgz — useful when iterating on the chart locally.
+DEFAULT_CHART_FILE="opc-simulator-0.1.0.tgz"
+DEFAULT_CHART_LOCAL="${SCRIPT_DIR}/charts/${DEFAULT_CHART_FILE}"
 CHART_PATH="${CHART_PATH:-${OPC_SIMULATOR_CHART_PATH:-}}"
 VALUES_FILE="${VALUES_FILE:-}"
 # Default simulator config: vendored TOML next to this script. Used
@@ -115,11 +124,21 @@ done
 require_cmd az jq kubectl helm
 
 # -------- Resolve chart path --------
-# We try, in order:
-#   1. The explicit --chart / CHART_PATH the caller gave us.
-#   2. A sibling-up walk: <script>/../../deploy/helm/opc-simulator
-#      (works when these tools are kept inside the OPC-Simulator repo).
-#   3. Bail with a helpful error.
+# Resolution order:
+#   1. The explicit --chart / CHART_PATH / OPC_SIMULATOR_CHART_PATH
+#      the caller gave us. Either a chart directory or a .tgz works.
+#   2. The vendored .tgz that bootstrap.sh drops next to this script
+#      (charts/opc-simulator-<version>.tgz). The default for users
+#      who installed via the one-liner.
+#   3. A sibling-up walk to <script>/../../deploy/helm/opc-simulator
+#      — only useful when these tools are run from inside the
+#      OPC-Simulator repo and you want to test chart edits without
+#      repackaging.
+#   4. Bail with a helpful error.
+if [[ -z "$CHART_PATH" && -f "$DEFAULT_CHART_LOCAL" ]]; then
+  CHART_PATH="$DEFAULT_CHART_LOCAL"
+fi
+
 if [[ -z "$CHART_PATH" ]]; then
   CANDIDATE="$(cd -- "${SCRIPT_DIR}/../../deploy/helm/opc-simulator" 2>/dev/null && pwd || true)"
   if [[ -n "$CANDIDATE" && -f "$CANDIDATE/Chart.yaml" ]]; then
@@ -127,9 +146,13 @@ if [[ -z "$CHART_PATH" ]]; then
   fi
 fi
 
-if [[ -z "$CHART_PATH" || ! -f "$CHART_PATH/Chart.yaml" ]]; then
+# Accept either a directory (must contain Chart.yaml) or a .tgz file.
+if [[ -z "$CHART_PATH" ]] \
+   || { [[ -d "$CHART_PATH" && ! -f "$CHART_PATH/Chart.yaml" ]]; } \
+   || { [[ ! -d "$CHART_PATH" && ! -f "$CHART_PATH" ]]; }; then
   err "Could not locate the opc-simulator helm chart."
-  err "Pass --chart <path-to-deploy/helm/opc-simulator> or set OPC_SIMULATOR_CHART_PATH."
+  err "Pass --chart <path-to-chart-dir-or-tgz> or set OPC_SIMULATOR_CHART_PATH."
+  err "Expected default: ${DEFAULT_CHART_LOCAL}"
   exit 1
 fi
 log "Using chart: $CHART_PATH"
