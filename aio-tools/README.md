@@ -95,11 +95,12 @@ IMAGE_REF=$(../deploy/scripts/build-and-push.sh -a myacr | tail -n1)
 # 4. See what's actually running on port 4840 in the cluster.
 ./show_simulators.sh
 
-# 5. Register an ADR device per simulator. The umati sample server
-#    needs an asset-type filter; ours is happy without one.
+# 5. Register an ADR device per simulator.
 ./register_device.sh --service opc-simulator
 ./register_device.sh --service umati-umati-000000 \
     --asset-type 'nsu=http://opcfoundation.org/UA/MachineTool/;i=13'
+./register_device.sh --service umati-umati-000000 \
+    --asset-type 'nsu=http://opcfoundation.org/UA/MachineTool/;i=1002'
 
 # 6a. Bulk onboard: wait up to 10 min for any 5 discovered assets.
 ./onboard_bulk.sh --count 5 --timeout 600
@@ -240,23 +241,56 @@ Pass `--show-details` to get a compact JSON dump of each asset
 the prompt. Pass `--max-iterations` to bound the run length;
 otherwise it loops until you quit.
 
+### `update_connector_image.sh <new-image> [--namespace <ns>] [--deployment <name>] [--timeout <secs>]`
+
+Patches the `opcuabroker_SupervisorConfiguration__CommanderConfiguration__Image`
+environment variable in the `aio-opc-supervisor` Deployment to swap
+the OPC UA Commander container image. Prints the old image before
+applying the change, then waits for the rollout to complete.
+
+* The image argument is a fully-qualified reference, e.g.
+  `aioconnectorsdev.azurecr.io/aio-connectors/opcua-commander:1.3.0-pullrequest15774076.1866`
+* Idempotent: if the image is already the requested value, exits
+  cleanly without patching.
+* Uses `kubectl patch --type=json` — no temporary YAML files needed.
+
+### `update_dataflow_image.sh <new-image> [--namespace <ns>] [--statefulset <name>] [--timeout <secs>]`
+
+Patches the `aio-dataflow-operator` StatefulSet to swap the dataflow
+operator container image. The single image argument is parsed into
+three environment variables:
+
+| Env var                     | Parsed from                                |
+| --------------------------- | ------------------------------------------ |
+| `DEFAULT_CONTAINER_REGISTRY`| Registry portion (e.g. `mcr.microsoft.com`)|
+| `DEFAULT_REPOSITORY`        | Repository path (e.g. `azureiotoperations/dataflow-operator`) |
+| `DEFAULT_CONTAINER_TAG`     | Tag (e.g. `1.4.6`)                         |
+
+Additionally, `DEFAULT_IMAGE_PULL_POLICY` is forced to `Always`
+(needed because dev images may reuse tags).
+
+Prints old → new values for all four fields, then waits for the
+StatefulSet rollout to complete.
+
 ---
 
 ## Files
 
 ```
-bootstrap.sh           # one-liner installer (curl ... | bash)
-common.sh              # shared helpers (logging, az login, kube wiring)
-onboard_lib.sh         # shared discoveredAsset → asset PUT logic
-discover_env.sh        # populate SUBSCRIPTION_ID, INSTANCE_NAME, …
-show_simulators.sh     # list k8s services on port 4840
-deploy_umati.sh        # helm install of the umati sample server
-deploy_opc_simulator.sh# helm install of this repo's opc-simulator chart
-register_device.sh     # PUT a Microsoft.DeviceRegistry/.../devices/<name>
-onboard_bulk.sh        # bulk onboard with --count + --timeout
-onboard_interactive.sh # interactive y/n onboard
-charts/                # vendored helm charts (opc-simulator + umati fork)
-README.md              # this file
+bootstrap.sh              # one-liner installer (curl ... | bash)
+common.sh                 # shared helpers (logging, az login, kube wiring)
+onboard_lib.sh            # shared discoveredAsset → asset PUT logic
+discover_env.sh           # populate SUBSCRIPTION_ID, INSTANCE_NAME, …
+show_simulators.sh        # list k8s services on port 4840
+deploy_umati.sh           # helm install of the umati sample server
+deploy_opc_simulator.sh   # helm install of this repo's opc-simulator chart
+register_device.sh        # PUT a Microsoft.DeviceRegistry/.../devices/<name>
+onboard_bulk.sh           # bulk onboard with --count + --timeout
+onboard_interactive.sh    # interactive y/n onboard
+update_connector_image.sh # swap the OPC UA Commander image (dev builds)
+update_dataflow_image.sh  # swap the dataflow operator image (dev builds)
+charts/                   # vendored helm charts (opc-simulator + umati fork)
+README.md                 # this file
 ```
 
 ---
@@ -288,6 +322,35 @@ eval "$(./discover_env.sh $MY_SUB $MY_RG)"
 # Drain whatever they discover (up to 20 assets / 15 minutes).
 ./onboard_bulk.sh --count 20 --timeout 900
 ```
+
+---
+
+## Swapping to developer images
+
+In case you need to replace the standard (MCR) container images with
+developer or PR-validation builds, two helper scripts let you patch
+the running workloads in-place without redeploying the full AIO
+stack:
+
+```bash
+# Replace the OPC UA Commander image used by the connector supervisor.
+./update_connector_image.sh \
+    aioconnectorsdev.azurecr.io/aio-connectors/opcua-commander:1.3.0-pullrequest15774076.1866
+
+# Replace the dataflow operator image.
+./update_dataflow_image.sh \
+    mqbuilds.azurecr.io/aio-dataflows/dataflow-operator:1.4.6-pullrequest12345.42
+```
+
+Both scripts print the old image value before applying the change,
+wait for the rollout to complete, and are idempotent (re-running
+with the same image is a no-op). To revert, simply run again with
+the original MCR image reference.
+
+> **Note:** These scripts only patch the running workload. A Helm
+> upgrade or AIO reconciliation loop may reset the values back to
+> the official images. Use these for **transient testing** of dev
+> builds, not permanent overrides.
 
 ---
 

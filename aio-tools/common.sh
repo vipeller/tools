@@ -125,6 +125,11 @@ get_aio_json() {
   : "${rg:?get_aio_json: resource group is required}"
   : "${name:?get_aio_json: AIO instance name is required}"
 
+  # Prevent az CLI from prompting to install the azure-iot-ops extension
+  # interactively (the prompt is invisible in non-interactive/piped contexts
+  # and causes the script to hang).
+  az config set extension.use_dynamic_install=yes_without_prompt 2>/dev/null || true
+
   local json aio_name
   json="$(az iot ops show -g "$rg" -n "$name" --only-show-errors -o json \
             2>/dev/null || true)"
