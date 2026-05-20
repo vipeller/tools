@@ -352,6 +352,14 @@ the original MCR image reference.
 > the official images. Use these for **transient testing** of dev
 > builds, not permanent overrides.
 
+## Installing xRegistry
+
+Use the following command to deploy xRegistry (e.g. for WoT support). No need to remove schema registry - they can run side by side.
+
+```
+helm install xregistry-service oci://akribuilds.azurecr.io/vaavva/helm/xregistry-service:0.1.3 -n azure-iot-operations
+```
+
 ---
 
 ## Tips & troubleshooting
