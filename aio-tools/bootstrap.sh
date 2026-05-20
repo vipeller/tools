@@ -52,6 +52,8 @@ SCRIPTS=(
   "register_device.sh"
   "onboard_bulk.sh"
   "onboard_interactive.sh"
+  "update_connector_image.sh"
+  "update_dataflow_image.sh"
 )
 
 # Documentation that's nice-to-have but not strictly required.
