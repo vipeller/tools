@@ -150,12 +150,14 @@ BODY="$(jq -n \
   --arg     loc  "$LOCATION" \
   --arg     addr "$ADDRESS" \
   --arg     ep   "$ENDPOINT_NAME" \
+  --arg     dev  "$DEVICE" \
   --argjson ats  "$ATS_JSON" '
 {
   extendedLocation: $ext,
   location: $loc,
   properties: {
     enabled: true,
+    externalDeviceId: $dev,
     attributes: { deviceType: "LDS" },
     endpoints: {
       inbound: (
