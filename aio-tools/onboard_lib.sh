@@ -103,7 +103,7 @@ onboard_one_asset() {
       extendedLocation: $ext,
       location: $loc,
       properties: {
-        externalAssetId: $props.externalAssetId,
+        externalAssetId: $dn,
         enabled: true,
         displayName: $dn,
         description: $desc,
