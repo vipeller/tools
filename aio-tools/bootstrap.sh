@@ -66,6 +66,7 @@ DOCS=(
 CHARTS=(
   "charts/opc-simulator-0.1.0.tgz"
   "charts/umati-sample-server-1.0-alpha.1-microsoft.1.tgz"
+  "charts/wot-ingestion-0.1.0.tgz"
 )
 
 # Plain resource files (configs, sample payloads, …) used by the
