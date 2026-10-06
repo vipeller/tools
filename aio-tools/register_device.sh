@@ -2,7 +2,7 @@
 #
 # register_device.sh — register an ADR (Microsoft.DeviceRegistry)
 # namespaced device pointing at an OPC UA endpoint that lives inside
-# the cluster (a Kubernetes Service on port 4840). Once the device is
+# the cluster (a Kubernetes Service, default port 4840). Once the device is
 # created with `runAssetDiscovery: true`, the OPC UA connector picks
 # it up and starts populating discoveredAssets in the same ADR
 # namespace.
@@ -10,7 +10,9 @@
 # Usage:
 #   ./register_device.sh --service <svc-name> [--device <device-name>]
 #                        [--asset-type <type>]... [--port 4840]
-#                        [--namespace <k8s-ns>]
+#                        [--endpoint-path <path>] [--namespace <k8s-ns>]
+#                        [--security-mode <None|Sign|SignAndEncrypt>]
+#                        [--security-policy <URI>]
 #
 # Required (env or flag):
 #   SUBSCRIPTION_ID, RESOURCE_GROUP, INSTANCE_NAME, LOCATION,
@@ -26,9 +28,15 @@
 #                            Pass nothing to leave the array empty
 #                            (i.e. discover everything).
 #   --port <n>            — OPC UA port (default: 4840).
+#   --endpoint-path <p>   — Optional URL path (default: empty). A leading
+#                            slash is added if omitted.
 #   --namespace <k8s-ns>  — Kubernetes namespace the service lives in.
 #                            Default: $NAMESPACE or azure-iot-operations.
 #   --endpoint-name <n>   — Key under endpoints.inbound (default: "default").
+#   --security-mode <m>   — None, Sign or SignAndEncrypt (default: None).
+#   --security-policy <u> — OPC UA security policy URI (default:
+#                            http://opcfoundation.org/UA/SecurityPolicy#None).
+#                            No policy or simulator auto-detection is performed.
 #
 # Idempotency: if the ADR device already exists, the script reports
 # it and does nothing.
@@ -42,8 +50,11 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE=""
 DEVICE=""
 PORT="4840"
+ENDPOINT_PATH=""
 NS_K8S="${NAMESPACE:-azure-iot-operations}"
 ENDPOINT_NAME="default"
+SECURITY_MODE="None"
+SECURITY_POLICY="http://opcfoundation.org/UA/SecurityPolicy#None"
 ASSET_TYPES=()
 
 usage() {
@@ -57,9 +68,14 @@ Options:
   -d, --device <name>       ADR device name (default: same as --service).
   -a, --asset-type <type>   AssetType string (repeatable). Empty by default.
   -p, --port <n>            OPC UA port (default: 4840).
+      --endpoint-path <p>   URL path (default: empty; leading slash optional).
   -n, --namespace <ns>      K8s namespace (default: $NAMESPACE or
                             azure-iot-operations).
       --endpoint-name <n>   endpoints.inbound key (default: "default").
+      --security-mode <m>   None, Sign or SignAndEncrypt (default: None).
+      --security-policy <URI>
+                            OPC UA security policy URI (default:
+                            http://opcfoundation.org/UA/SecurityPolicy#None).
   -h, --help                Show this help.
 
 Required environment (run `eval "$(./discover_env.sh ...)"` first):
@@ -73,6 +89,13 @@ Examples:
   # Register umati with a MachineTool asset-type filter:
   ./register_device.sh --service umati-umati-000000 \
       --asset-type 'nsu=http://opcfoundation.org/UA/MachineTool/;i=13'
+
+  # Register the pump server (requires signing/encryption) with a PumpType filter:
+  ./register_device.sh --service pump-pump-device-integration-server \
+      --port 62542 --endpoint-path /PumpDeviceIntegrationServer \
+      --security-mode SignAndEncrypt \
+      --security-policy 'http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256' \
+      --asset-type 'nsu=http://opcfoundation.org/UA/Pumps/;i=1052'
 EOF
 }
 
@@ -82,14 +105,21 @@ while [[ $# -gt 0 ]]; do
     -d|--device)         DEVICE="$2"; shift 2 ;;
     -a|--asset-type)     ASSET_TYPES+=("$2"); shift 2 ;;
     -p|--port)           PORT="$2"; shift 2 ;;
+       --endpoint-path)  ENDPOINT_PATH="$2"; shift 2 ;;
     -n|--namespace)      NS_K8S="$2"; shift 2 ;;
        --endpoint-name)  ENDPOINT_NAME="$2"; shift 2 ;;
+       --security-mode)  SECURITY_MODE="$2"; shift 2 ;;
+       --security-policy) SECURITY_POLICY="$2"; shift 2 ;;
     -h|--help)           usage; exit 0 ;;
     *) err "Unknown argument: $1"; usage; exit 2 ;;
   esac
 done
 
 [[ -n "$SERVICE" ]] || { err "Service name required (--service)"; usage; exit 2; }
+case "$SECURITY_MODE" in
+  None|Sign|SignAndEncrypt) ;;
+  *) err "Invalid security mode '$SECURITY_MODE' (expected None, Sign or SignAndEncrypt)"; usage; exit 2 ;;
+esac
 DEVICE="${DEVICE:-$SERVICE}"
 
 : "${SUBSCRIPTION_ID:?set SUBSCRIPTION_ID (run discover_env.sh first)}"
@@ -123,7 +153,10 @@ if [[ -n "$EXIST_ID" ]]; then
 fi
 
 # -------- Build the OPC UA endpoint address --------
-ADDRESS="opc.tcp://${SERVICE}.${NS_K8S}.svc.cluster.local:${PORT}"
+if [[ -n "$ENDPOINT_PATH" ]]; then
+  ENDPOINT_PATH="/${ENDPOINT_PATH#/}"
+fi
+ADDRESS="opc.tcp://${SERVICE}.${NS_K8S}.svc.cluster.local:${PORT}${ENDPOINT_PATH}"
 log "Endpoint address: $ADDRESS"
 
 # -------- Compose request body --------
@@ -151,6 +184,8 @@ BODY="$(jq -n \
   --arg     addr "$ADDRESS" \
   --arg     ep   "$ENDPOINT_NAME" \
   --arg     dev  "$DEVICE" \
+  --arg     security_mode   "$SECURITY_MODE" \
+  --arg     security_policy "$SECURITY_POLICY" \
   --argjson ats  "$ATS_JSON" '
 {
   extendedLocation: $ext,
@@ -167,8 +202,8 @@ BODY="$(jq -n \
             authentication: { method: "Anonymous" },
             additionalConfiguration: ({
               security: {
-                securityMode: "None",
-                securityPolicy: "http://opcfoundation.org/UA/SecurityPolicy#None",
+                securityMode: $security_mode,
+                securityPolicy: $security_policy,
                 autoAcceptUntrustedServerCertificates: true
               },
               runAssetDiscovery: true,

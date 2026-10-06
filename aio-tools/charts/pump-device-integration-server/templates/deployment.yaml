@@ -1,0 +1,111 @@
+{{- if or (not (regexMatch "^[0-9]+$" (toString .Values.pumps))) (lt (int .Values.pumps) 1) (gt (int .Values.pumps) 100) -}}
+{{- fail "pumps must be an integer between 1 and 100" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pump.fullname" . }}
+  labels:
+    {{- include "pump.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "pump.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "pump.selectorLabels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        fsGroup: 1654
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: pump
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            - name: host
+              value: "0.0.0.0"
+            - name: port
+              value: "62542"
+            - name: pumps
+              value: {{ .Values.pumps | quote }}
+          ports:
+            - name: opc-tcp
+              containerPort: 62542
+              protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: opc-tcp
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: opc-tcp
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: opc-tcp
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: pki
+              mountPath: /app/pki
+            {{- if .Values.connectorTrust.enabled }}
+            - name: connector-ca
+              mountPath: /app/pki/trusted/certs
+              readOnly: true
+            - name: connector-crl
+              mountPath: /app/pki/trusted/crl
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: pki
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "pump.pkiClaim" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.connectorTrust.enabled }}
+        - name: connector-ca
+          secret:
+            secretName: {{ required "connectorTrust.caSecretName is required" .Values.connectorTrust.caSecretName | quote }}
+            items:
+              - key: {{ required "connectorTrust.caCertificateKey is required" .Values.connectorTrust.caCertificateKey | quote }}
+                path: aio-gds-ca.pem
+        - name: connector-crl
+          secret:
+            secretName: {{ required "connectorTrust.crlSecretName is required" .Values.connectorTrust.crlSecretName | quote }}
+            items:
+              - key: {{ required "connectorTrust.crlKey is required" .Values.connectorTrust.crlKey | quote }}
+                path: aio-gds-ca.crl
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

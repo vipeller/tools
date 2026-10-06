@@ -7,7 +7,7 @@ running and testing OPC UA simulators on top of an existing
 
 1. **Discover** the AIO instance / ADR namespace in a given
    subscription + resource group.
-2. **Deploy** one (or both) of the supported OPC UA simulators
+2. **Deploy** any of the supported OPC UA simulators
    into the AIO Kubernetes cluster:
    * **opc-simulator** — the simulator that lives in this repository.
    * **umati** — the [umati sample server](https://github.com/umati/Sample-Server),
@@ -17,6 +17,11 @@ running and testing OPC UA simulators on top of an existing
      the cert-manager Certificate's subject — required by our
      corporate OPC UA application-instance certificate policy).
      See [`charts/README.md`](charts/README.md).
+   * **pump** — the OPC Foundation
+     [PumpDeviceIntegrationServer sample](https://github.com/OPCFoundation/UA-.NETStandard/tree/7212607f1652f37ca90b342ec9afa864f328850e/samples/DI/PumpDeviceIntegrationServer),
+     deployed with our **local** `pump-device-integration-server` Helm
+     chart. Upstream supplies `kubernetes.yaml`, not a pump Helm chart.
+     We track the chart source and vendor its package under `charts/`.
 3. **Register** each simulator as an ADR namespaced device so that
    the OPC UA connector starts running asset discovery against it.
 4. **Onboard** the resulting `discoveredAssets` into regular ADR
@@ -41,7 +46,7 @@ themselves require:
 | `az`       | Azure CLI; signed in to a subscription that owns the AIO. |
 | `jq`       | JSON munging — every script.                              |
 | `kubectl`  | Used by the deploy / show scripts.                        |
-| `helm`     | Used by the two deploy scripts.                           |
+| `helm`     | Used by the three deploy scripts.                         |
 | `column`   | Used by `show_simulators.sh` for table layout.            |
 
 The first time `onboard_*` runs, it ensures the `azure-iot-ops`
@@ -60,7 +65,8 @@ single-AKS resource groups the deploy scripts will run
 ### Option A — One-liner (no clone needed)
 
 Good for Azure Cloud Shell or a fresh laptop. Pulls every script and
-the vendored helm chart from the repo:
+the vendored Helm chart packages (including the local pump chart)
+from the repo:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/vipeller/tools/main/aio-tools/bootstrap.sh \
@@ -91,8 +97,9 @@ IMAGE_REF=$(../deploy/scripts/build-and-push.sh -a myacr | tail -n1)
 #    --image is optional; omit it to use the default ACR image.
 ./deploy_opc_simulator.sh --image "$IMAGE_REF"
 ./deploy_umati.sh
+./deploy_pump.sh --pumps 2
 
-# 4. See what's actually running on port 4840 in the cluster.
+# 4. See OPC UA services, including the pump's actual port and path.
 ./show_simulators.sh
 
 # 5. Register an ADR device per simulator.
@@ -101,6 +108,14 @@ IMAGE_REF=$(../deploy/scripts/build-and-push.sh -a myacr | tail -n1)
     --asset-type 'nsu=http://opcfoundation.org/UA/MachineTool/;i=13'
 ./register_device.sh --service umati-umati-000000 \
     --asset-type 'nsu=http://opcfoundation.org/UA/MachineTool/;i=1002'
+# Use the short ADR device name to keep generated management-action topics short.
+# Pump endpoints require signing/encryption; keep all these options.
+./register_device.sh --service pump-pump-device-integration-server \
+    --device pump \
+    --port 62542 --endpoint-path /PumpDeviceIntegrationServer \
+    --security-mode SignAndEncrypt \
+    --security-policy 'http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256' \
+    --asset-type 'nsu=http://opcfoundation.org/UA/Pumps/;i=1052'
 
 # 6a. Bulk onboard: wait up to 10 min for any 5 discovered assets.
 ./onboard_bulk.sh --count 5 --timeout 600
@@ -128,10 +143,18 @@ and prints a block of `export` lines on stdout (logs go to stderr).
 
 ### `show_simulators.sh [-n <ns>] [-A]`
 
-Lists all Kubernetes Services that expose port 4840 and labels each
-one as `umati`, `opc-simulator`, or `unknown` based on the
-`app.kubernetes.io/name` selector. The `DNS-ADDRESS` column is what
-you'd hand to `register_device.sh --service`.
+Lists Kubernetes Services that expose port 4840, plus pump services
+identified by `pump-device-integration-server` in their
+`app.kubernetes.io/name` or `app` labels/selectors, even on other
+ports. Kinds are `umati`, `opc-simulator`, `pump`, or `unknown`.
+Pump addresses use the actual Service port (preferring the named
+`opc-tcp` port, then 62542 or 4840) and include
+`/PumpDeviceIntegrationServer`.
+
+Use the `NAME` column for `register_device.sh --service`, the
+`NAMESPACE` column for `--namespace`, and the port/path from
+`DNS-ADDRESS` for `--port` / `--endpoint-path`. Do not pass the full
+DNS address as the service name.
 
 ### `deploy_umati.sh [--release <name>] [--namespace <ns>] [--chart <path|url>]`
 
@@ -173,11 +196,90 @@ copy of `OPC-Simulator/deploy/helm/opc-simulator`).
   if your `--release` already contains the substring `opc-simulator`,
   it's the service name; otherwise it's `<release>-opc-simulator`.
 
-### `register_device.sh --service <svc> [--device <name>] [--asset-type <type>]... [--port 4840] [--namespace <k8s-ns>]`
+### `deploy_pump.sh [--release <name>] [--namespace <ns>] [--image <ref>] [--pumps N] [--chart <path>] [--values <yaml>] [--timeout <secs>]`
+
+Deploys one OPC Foundation PumpDeviceIntegrationServer per Helm
+release, containing multiple pumps (not one Pod per pump).
+
+* Defaults: release `pump`, namespace `azure-iot-operations`, and
+  image `ghcr.io/opcfoundation/uanetstandard/pumpserver:latest-master`.
+  `--release` / `RELEASE` and `--namespace` / `NAMESPACE` override
+  the release and namespace.
+* `--image` / `IMAGE` accepts a **full image reference**, including
+  a tag or digest. The default is a publicly pullable Linux
+  amd64/arm64 image, but `latest-master` is an upstream development
+  tag that can change. Pin a chosen tag or digest for repeatability.
+* `--pumps` / `PUMP_COUNT` defaults to **2**, with a supported range
+  of **1–100**. Use another release name for a separate server.
+* Chart resolution order:
+  1. Explicit `--chart` / `CHART_PATH` (chart directory or `.tgz`).
+  2. Vendored `charts/pump-device-integration-server-0.1.1.tgz`
+     beside the script (downloaded by `bootstrap.sh`).
+  3. Local source directory `charts/pump-device-integration-server`.
+  There is no upstream Helm chart or remote-chart fallback.
+* `--values` / `VALUES_FILE` supplies extra Helm values. Its `image`
+  and `pumps` values are preserved unless the corresponding flag or
+  environment variable is explicitly supplied.
+  `--timeout` / `TIMEOUT_SECONDS` sets the Helm wait budget in seconds.
+* Persistence is **disabled** by default: `/app/pki` uses `emptyDir`,
+  so Pod replacement loses certificates and trust state. To persist
+  PKI, set `persistence.enabled: true` in a values file. The chart
+  also supports `persistence.existingClaim`,
+  `persistence.storageClass`, and `persistence.size`.
+  There is no diagnostic sidecar.
+* The chart mounts the AIO connector's **public issuing CA certificate**
+  (`tls.crt` from Secret `aio-opc-ua-gds-ca-cert`) and **DER CRL**
+  (`aio-opc-ua-gds-ca.crl` from Secret `aio-opc-ua-gds-ca-crl`) into
+  `/app/pki/trusted/certs` and `/app/pki/trusted/crl`. These Secrets must
+  exist in the pump's namespace. No CA private key is mounted.
+  Directory mounts allow Kubernetes to refresh the files when Secrets
+  change; the upstream store reloads them. Override `connectorTrust`
+  names/keys in a values file for different AIO installations. For
+  standalone use with separately managed trust, set
+  `connectorTrust.enabled: false`.
+* Upstream generates its application certificate with `O=OPC Foundation`.
+  Unlike the umati fork, this chart does not rewrite certificate subjects
+  to `O=Microsoft`. Clusters enforcing that organization policy need
+  compatible certificate/PKI configuration separately.
+* The default Service is
+  `pump-pump-device-integration-server.azure-iot-operations.svc.cluster.local:62542`,
+  with endpoint path `/PumpDeviceIntegrationServer`. The usual Helm
+  fullname rule uses `<release>-pump-device-integration-server`, or
+  just the release if it already contains the chart name, truncating
+  to 63 characters and trimming trailing hyphens. Values overrides
+  can change the name or Service port; use the deployment script's
+  output, which discovers the actual Service and port, rather than
+  assuming the defaults.
+* Register with **`--device pump`**, as shown below. This short ADR
+  device name is separate from the Kubernetes Service name and keeps
+  generated asset names and management-action topics shorter, avoiding
+  the topic-length error observed with the default long device name.
+  If using the deployment script's registration hint, add `--device pump`.
+* Upstream enables **encrypted endpoints only** by default. Use the
+  pump registration command in the quick start with `SignAndEncrypt`,
+  the full `Basic256Sha256` policy URI, port, path, and `PumpType`
+  filter (`nsu=http://opcfoundation.org/UA/Pumps/;i=1052`). The generic
+  onboarding scripts work unchanged for discovered pump assets.
+
+See [`charts/README.md`](charts/README.md) for provenance and the
+`helm package` command to reproduce the local chart package. The
+sample's certificate auto-acceptance is for testing, **not production**.
+
+### `register_device.sh --service <svc> [--device <name>] [--asset-type <type>]... [--port 4840] [--endpoint-path <path>] [--namespace <k8s-ns>] [--security-mode <mode>] [--security-policy <URI>]`
 
 Creates a `Microsoft.DeviceRegistry/namespaces/devices` resource
 that points at a Kubernetes Service inside the cluster. The address
-is composed as `opc.tcp://<service>.<k8s-ns>.svc.cluster.local:<port>`.
+is composed as
+`opc.tcp://<service>.<k8s-ns>.svc.cluster.local:<port><endpoint-path>`.
+
+* `--endpoint-path` is optional and defaults to empty. A leading
+  slash is added if omitted.
+* `--security-mode` accepts `None`, `Sign`, or `SignAndEncrypt` and
+  defaults to `None`. `--security-policy` defaults to the full URI
+  `http://opcfoundation.org/UA/SecurityPolicy#None`. There is no
+  simulator/security auto-detection: existing simulator behavior is
+  unchanged, and the pump requires the explicit encrypted settings
+  shown in the quick start.
 
 * `--asset-type` is **repeatable** and **optional**. Pass nothing
   to leave the array empty (the OPC UA connector treats this as
@@ -190,7 +292,8 @@ is composed as `opc.tcp://<service>.<k8s-ns>.svc.cluster.local:<port>`.
   ```
 
 * The endpoint type sent to the API is `Microsoft.OpcUa`, with the
-  modern (2025-10-01) `additionalConfiguration` shape:
+  modern (2025-10-01) `additionalConfiguration` shape (defaults shown;
+  the security flags override `securityMode` and `securityPolicy`):
 
   ```json
   {
@@ -204,6 +307,8 @@ is composed as `opc.tcp://<service>.<k8s-ns>.svc.cluster.local:<port>`.
   }
   ```
 
+* `autoAcceptUntrustedServerCertificates: true` is a sample/testing
+  convenience, **not production certificate trust management**.
 * The script is **idempotent**: an existing device with the same
   name is reported and left alone.
 
@@ -281,15 +386,18 @@ bootstrap.sh              # one-liner installer (curl ... | bash)
 common.sh                 # shared helpers (logging, az login, kube wiring)
 onboard_lib.sh            # shared discoveredAsset → asset PUT logic
 discover_env.sh           # populate SUBSCRIPTION_ID, INSTANCE_NAME, …
-show_simulators.sh        # list k8s services on port 4840
+show_simulators.sh        # list OPC UA services, including pump port/path
 deploy_umati.sh           # helm install of the umati sample server
 deploy_opc_simulator.sh   # helm install of this repo's opc-simulator chart
+deploy_pump.sh            # helm install of the local pump server chart
 register_device.sh        # PUT a Microsoft.DeviceRegistry/.../devices/<name>
 onboard_bulk.sh           # bulk onboard with --count + --timeout
 onboard_interactive.sh    # interactive y/n onboard
 update_connector_image.sh # swap the OPC UA Commander image (dev builds)
 update_dataflow_image.sh  # swap the dataflow operator image (dev builds)
-charts/                   # vendored helm charts (opc-simulator + umati fork)
+charts/                   # vendored Helm chart packages + local pump source
+charts/pump-device-integration-server/           # tracked local chart source
+charts/pump-device-integration-server-0.1.1.tgz  # package used by bootstrap
 README.md                 # this file
 ```
 
@@ -297,7 +405,7 @@ README.md                 # this file
 
 ## Typical end-to-end flow
 
-A full "run" of a fresh AIO cluster, deploying both simulators and
+A full "run" of a fresh AIO cluster, deploying all three simulators and
 onboarding everything they expose:
 
 ```bash
@@ -308,16 +416,23 @@ eval "$(./discover_env.sh $MY_SUB $MY_RG)"
 # point at a freshly-built one).
 ./deploy_opc_simulator.sh
 
-# Deploy umati alongside it.
+# Deploy umati and the pump server alongside it.
 ./deploy_umati.sh
+./deploy_pump.sh --pumps 2
 
 # Sanity check.
 ./show_simulators.sh
 
-# Register both as ADR devices.
+# Register each as an ADR device.
 ./register_device.sh --service opc-simulator
 ./register_device.sh --service umati-umati-000000 \
     --asset-type 'nsu=http://opcfoundation.org/UA/MachineTool/;i=13'
+./register_device.sh --service pump-pump-device-integration-server \
+    --device pump \
+    --port 62542 --endpoint-path /PumpDeviceIntegrationServer \
+    --security-mode SignAndEncrypt \
+    --security-policy 'http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256' \
+    --asset-type 'nsu=http://opcfoundation.org/UA/Pumps/;i=1052'
 
 # Drain whatever they discover (up to 20 assets / 15 minutes).
 ./onboard_bulk.sh --count 20 --timeout 900
@@ -370,6 +485,56 @@ helm install wot-ingestion charts/wot-ingestion-0.1.0.tgz \
   --set image.tag=0.1.0 \
   --set mqtt.topic="goldenpath"
 ```
+
+---
+
+## Validation
+
+Run the offline regression tests from the repository root (requires
+Python 3.9+, Bash, `jq`, and Helm; no Azure account or cluster needed):
+
+```bash
+python3 -B -m unittest discover -s aio-tools/tests -v
+```
+
+These cover deployment arguments and idempotency, registration payloads,
+simulator listing, Helm rendering and persistence, and source/package
+parity. Live AIO connector discovery still requires your cluster.
+
+---
+
+## Pump connector certificate troubleshooting
+
+`Could not verify security on OpenSecureChannel request` is a generic
+server-side rejection. Check the **pump logs**, not just connector logs:
+
+```bash
+kubectl logs -n azure-iot-operations \
+    -l app.kubernetes.io/name=pump-device-integration-server --since=5m
+```
+
+If they report `BadCertificateRevocationUnknown` and
+`Certificate revocation list not found`, the pump needs the issuing
+CA's current CRL. Auto-accepting an untrusted client certificate does
+**not** suppress missing-CRL errors. Chart `0.1.1` mounts the standard
+AIO GDS public CA and CRL while retaining revocation checking.
+
+To update a previously deployed `pump` release, run from `aio-tools/`:
+
+```bash
+helm upgrade pump charts/pump-device-integration-server-0.1.1.tgz \
+    --namespace azure-iot-operations --wait --timeout 300s
+```
+
+Reapply any custom image, pump-count, or persistence values with `-f` /
+`--set` when upgrading. `deploy_pump.sh` intentionally leaves existing
+releases alone. No device re-registration is needed if the endpoint
+and security settings are unchanged; the connector retries the connection.
+
+The projected files must contain the matching PEM issuing CA certificate
+and a current, signed DER CRL. If the CA/CRL Secret names differ or the
+pump runs in another namespace, configure/provision them there rather
+than disabling encryption or revocation checks.
 
 ---
 

@@ -1,0 +1,37 @@
+# Full image reference, also accepted by deploy_pump.sh --image.
+# This development tag follows upstream master; pin a tag/digest for repeatability.
+image: ghcr.io/opcfoundation/uanetstandard/pumpserver:latest-master
+imagePullPolicy: Always
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# One server per release; each server materialises 1..100 PumpType instances.
+pumps: 2
+service:
+  type: ClusterIP
+  port: 62542
+
+# Keep the runtime PKI store writable for the image's non-root user.
+# Without persistence certificates survive container restarts, not pod replacement.
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  size: 1Gi
+
+# Trust the AIO connector's issuing CA and check its revocation list.
+# Project only public keys; never mount the CA secret's tls.key.
+# Mount directories (not subPath files) so kubelet can refresh rotated material.
+# Set enabled=false only for standalone use with a separately managed trust store.
+connectorTrust:
+  enabled: true
+  caSecretName: aio-opc-ua-gds-ca-cert
+  caCertificateKey: tls.crt
+  crlSecretName: aio-opc-ua-gds-ca-crl
+  crlKey: aio-opc-ua-gds-ca.crl
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,9 @@
+apiVersion: v2
+name: pump-device-integration-server
+description: OPC Foundation PumpDeviceIntegrationServer simulator for Azure IoT Operations
+type: application
+version: 0.1.1
+appVersion: latest-master
+home: https://github.com/OPCFoundation/UA-.NETStandard/tree/master/samples/DI/PumpDeviceIntegrationServer
+sources:
+  - https://github.com/OPCFoundation/UA-.NETStandard

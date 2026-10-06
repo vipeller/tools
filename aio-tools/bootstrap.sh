@@ -11,10 +11,10 @@
 #
 # What it does:
 #   1. Downloads every script in this directory (common.sh,
-#      onboard_lib.sh, the eight *.sh tools, and this README) into
+#      onboard_lib.sh, and the deployment/onboarding tools) into
 #      ./aio-tools (override with TARGET_DIR).
-#   2. Downloads the vendored umati helm chart .tgz into
-#      ./aio-tools/charts/.
+#   2. Downloads the docs and vendored helm chart packages (including
+#      the local pump chart) into ./aio-tools and ./aio-tools/charts/.
 #   3. `chmod +x`'s the .sh files.
 #   4. Prints a "next steps" hint.
 #
@@ -49,6 +49,7 @@ SCRIPTS=(
   "show_simulators.sh"
   "deploy_umati.sh"
   "deploy_opc_simulator.sh"
+  "deploy_pump.sh"
   "register_device.sh"
   "onboard_bulk.sh"
   "onboard_interactive.sh"
@@ -65,6 +66,7 @@ DOCS=(
 # Vendored helm chart(s). Add new entries when we vendor more.
 CHARTS=(
   "charts/opc-simulator-0.1.0.tgz"
+  "charts/pump-device-integration-server-0.1.1.tgz"
   "charts/umati-sample-server-1.0-alpha.1-microsoft.1.tgz"
   "charts/wot-ingestion-0.1.0.tgz"
 )

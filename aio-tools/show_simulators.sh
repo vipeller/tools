@@ -4,10 +4,12 @@
 # in the cluster.
 #
 # Heuristic: any Service whose `spec.ports[].port == 4840` is an OPC
-# UA endpoint we care about. The script then tries to label each one
-# as either "umati", "opc-simulator" or "unknown" by inspecting the
-# `app.kubernetes.io/name` selector — the umati helm chart uses
-# `umati-sample-server`, our chart uses `opc-simulator`.
+# UA endpoint we care about. Also include pump services identified by
+# `app.kubernetes.io/name` or `app` labels/selectors with the value
+# `pump-device-integration-server`. Pump ports prefer the named
+# `opc-tcp` service port, falling back to 62542 or 4840.
+# Kinds are "umati", "opc-simulator", "pump" or "unknown"; DNS addresses
+# use the service port and include /PumpDeviceIntegrationServer for pumps.
 #
 # Usage:
 #   ./show_simulators.sh                       # uses $NAMESPACE (default: azure-iot-operations)
@@ -35,6 +37,9 @@ Options:
                           or azure-iot-operations).
   -A, --all-namespaces    Search every namespace.
   -h, --help              Show this help.
+
+Lists services on port 4840 and known pump-device-integration-server services.
+Pump DNS addresses use the OPC UA service port and /PumpDeviceIntegrationServer.
 EOF
 }
 
@@ -50,45 +55,65 @@ done
 require_cmd kubectl jq
 
 if [[ "$ALL_NS" -eq 1 ]]; then
-  log "Listing OPC UA services (port 4840) across all namespaces…"
+  log "Listing OPC UA services (port 4840 or known pump services) across all namespaces…"
   RAW="$(kubectl get svc --all-namespaces -o json)"
 else
-  log "Listing OPC UA services (port 4840) in namespace '$NAMESPACE'…"
+  log "Listing OPC UA services (port 4840 or known pump services) in namespace '$NAMESPACE'…"
   RAW="$(kubectl get svc -n "$NAMESPACE" -o json)"
 fi
 
 # Filter & shape into tab-separated rows the consumer can easily eat.
-# The label heuristic looks at:
-#   1. metadata.labels["app.kubernetes.io/name"]  (helm convention)
-#   2. spec.selector["app.kubernetes.io/name"]    (fallback)
-# and maps known values to a canonical "kind".
+# Recognize pump names in either labels or selectors, including `app`.
+# Other kinds retain the standard name-label/selector precedence.
+# Choose one OPC UA service port, not targetPort or unrelated ports,
+# so multi-port services produce a single row.
 ROWS="$(jq -r '
   .items[]
   | select(.spec.ports != null)
-  | select(any(.spec.ports[]; .port == 4840))
   | . as $svc
+  | ([
+      $svc.metadata.labels["app.kubernetes.io/name"],
+      $svc.spec.selector["app.kubernetes.io/name"],
+      $svc.metadata.labels.app,
+      $svc.spec.selector.app
+    ] | any(. == "pump-device-integration-server")) as $pump
+  | select($pump or any($svc.spec.ports[]; .port == 4840))
   | (
       ($svc.metadata.labels["app.kubernetes.io/name"]
        // $svc.spec.selector["app.kubernetes.io/name"]
+       // $svc.metadata.labels.app
+       // $svc.spec.selector.app
        // "unknown") as $appname
-      | (if   $appname == "umati-sample-server" then "umati"
+      | (if   $pump                              then "pump"
+         elif $appname == "umati-sample-server" then "umati"
          elif $appname == "opc-simulator"      then "opc-simulator"
          else "unknown" end) as $kind
-      | (($svc.metadata.labels["app.kubernetes.io/instance"]) // "") as $release
+      | (if $pump then
+           ([$svc.spec.ports[] | select(.name == "opc-tcp")][0]
+            // [$svc.spec.ports[] | select(.port == 62542)][0]
+            // [$svc.spec.ports[] | select(.port == 4840)][0])
+         else
+           [$svc.spec.ports[] | select(.port == 4840)][0]
+         end) as $opcport
+      | select($opcport != null)
+      | ($svc.metadata.labels["app.kubernetes.io/instance"]
+         // $svc.spec.selector["app.kubernetes.io/instance"] // "") as $release
       | [
           $svc.metadata.namespace,
           $svc.metadata.name,
           $kind,
           $release,
           ($svc.spec.clusterIP // ""),
-          ($svc.metadata.name + "." + $svc.metadata.namespace + ".svc.cluster.local:4840")
+          ($svc.metadata.name + "." + $svc.metadata.namespace
+           + ".svc.cluster.local:" + ($opcport.port | tostring)
+           + (if $pump then "/PumpDeviceIntegrationServer" else "" end))
         ]
       | @tsv
     )
 ' <<<"$RAW")"
 
 if [[ -z "$ROWS" ]]; then
-  warn "No OPC UA services (port 4840) found."
+  warn "No OPC UA services (port 4840 or known pump services) found."
   exit 0
 fi
 
