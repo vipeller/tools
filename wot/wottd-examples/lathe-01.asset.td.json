@@ -1,0 +1,70 @@
+{
+  "@context": [
+    "https://www.w3.org/2022/wot/td/v1.1",
+    {
+      "dov": "http://azure.com/IoT/operations/tm#",
+      "adr": "http://azure.com/IoT/operations/deviceregistry#",
+      "uav": "http://opcfoundation.org/UA/WoT-Binding/v1.00",
+      "mqv": "http://www.w3.org/2019/wot/mqtt#"
+    }
+  ],
+  "@type": "Thing",
+  "id": "urn:azureiot:aio:opc-simulator:default:Lathe-01",
+  "title": "Lathe-01",
+  "security": [
+    "nosec_sc"
+  ],
+  "securityDefinitions": {
+    "nosec_sc": {
+      "scheme": "nosec"
+    }
+  },
+  "base": "opc.tcp://opc-simulator.azure-iot-operations.svc.cluster.local:4840",
+  "dov:assetType": "urn:org.opcfoundation.UA.MachineTool.MachineToolType",
+  "dov:deviceMetadata": {
+    "externalDeviceId": "opc-simulator"
+  },
+  "dov:metadata": {
+    "DisplayName": "Lathe-01",
+    "Manufacturer": "Acme Machines",
+    "Model": "SimpleLath-100",
+    "HardwareRevision": "1.0",
+    "SoftwareRevision": "1.4.2",
+    "SerialNumber": "SL-Lathe-01"
+  },
+  "links": [
+    {
+      "rel": "tm:submodel",
+      "href": "urn:azureiot:aio:opc-simulator:default:Lathe-01:dataset.Objects.Lathe-01",
+      "type": "application/td+json"
+    },
+    {
+      "rel": "tm:submodel",
+      "href": "urn:azureiot:aio:opc-simulator:default:Lathe-01:actiongroup.Objects.Lathe-01",
+      "type": "application/td+json"
+    },
+    {
+      "rel": "dov:capability",
+      "href": "urn:org.opcfoundation.UA.MachineTool.MachineToolType",
+      "type": "application/tm+json"
+    },
+    {
+      "rel": "adr:asset",
+      "href": "urn:azure:iot:adr:uuid:39270d63-63f9-4935-bcb7-b22bf9eec623",
+      "anchor": "#"
+    },
+    {
+      "rel": "adr:device",
+      "href": "urn:azure:iot:adr:uuid:056cc98b-5c6d-433a-aaf0-575e67cb1c98",
+      "anchor": "#"
+    },
+    {
+      "rel": "adr:endpoint",
+      "href": "urn:azure:iot:adr:endpoint:opc-simulator.default",
+      "anchor": "#"
+    }
+  ],
+  "version": {
+    "instance": "1"
+  }
+}

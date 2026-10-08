@@ -1,0 +1,131 @@
+{
+  "@context": [
+    "https://www.w3.org/2022/wot/td/v1.1",
+    {
+      "dov": "http://azure.com/IoT/operations/tm#",
+      "adr": "http://azure.com/IoT/operations/deviceregistry#",
+      "uav": "http://opcfoundation.org/UA/WoT-Binding/v1.00",
+      "mqv": "http://www.w3.org/2019/wot/mqtt#"
+    }
+  ],
+  "@type": "Thing",
+  "id": "urn:azureiot:aio:opc-simulator:default:Lathe-01:actiongroup.Objects.Lathe-01",
+  "title": "Objects.Lathe-01",
+  "security": [
+    "nosec_sc"
+  ],
+  "securityDefinitions": {
+    "nosec_sc": {
+      "scheme": "nosec"
+    }
+  },
+  "version": {
+    "instance": "1"
+  },
+  "dov:typeRef": "org.opcfoundation.UA.MachineTool.MachineToolType",
+  "dov:dataSource": "nsu=http://opc-simulator.local/UA/;s=device.Lathe-01",
+  "actions": {
+    "WriteMonitoringMachineToolIsWarmUp": {
+      "title": "WriteMonitoring.MachineTool.IsWarmUp",
+      "dov:typeRef": "org.opcfoundation.UA.Boolean",
+      "forms": [
+        {
+          "href": "/?id=nsu=http://opc-simulator.local/UA/;s=var.Lathe-01/Monitoring/MachineTool/IsWarmUp",
+          "op": [
+            "invokeaction"
+          ],
+          "contentType": "application/json"
+        },
+        {
+          "href": "mqtts://aio-broker.azure-iot-operations:18883",
+          "op": [
+            "invokeaction"
+          ],
+          "contentType": "application/json",
+          "subprotocol": "mqtt",
+          "mqv:topic": "azure-iot-operations/asset-operations/opc-simulator-objects-lathe-01/builtin/Objects.Lathe-01",
+          "mqv:qos": 1,
+          "mqv:retain": false
+        }
+      ],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "Monitoring.MachineTool.IsWarmUp": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "Monitoring.MachineTool.IsWarmUp"
+        ]
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    "WriteMonitoringMachineToolPowerOnDuration": {
+      "title": "WriteMonitoring.MachineTool.PowerOnDuration",
+      "dov:typeRef": "org.opcfoundation.UA.UInt32",
+      "forms": [
+        {
+          "href": "/?id=nsu=http://opc-simulator.local/UA/;s=var.Lathe-01/Monitoring/MachineTool/PowerOnDuration",
+          "op": [
+            "invokeaction"
+          ],
+          "contentType": "application/json"
+        },
+        {
+          "href": "mqtts://aio-broker.azure-iot-operations:18883",
+          "op": [
+            "invokeaction"
+          ],
+          "contentType": "application/json",
+          "subprotocol": "mqtt",
+          "mqv:topic": "azure-iot-operations/asset-operations/opc-simulator-objects-lathe-01/builtin/Objects.Lathe-01",
+          "mqv:qos": 1,
+          "mqv:retain": false
+        }
+      ],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "Monitoring.MachineTool.PowerOnDuration": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        },
+        "required": [
+          "Monitoring.MachineTool.PowerOnDuration"
+        ]
+      },
+      "output": {
+        "type": "object"
+      }
+    }
+  },
+  "links": [
+    {
+      "rel": "collection",
+      "href": "urn:azureiot:aio:opc-simulator:default:Lathe-01",
+      "type": "application/td+json"
+    },
+    {
+      "rel": "dov:capability",
+      "href": "urn:org.opcfoundation.UA.MachineTool.MachineToolType",
+      "type": "application/tm+json"
+    },
+    {
+      "rel": "dov:capability",
+      "href": "urn:org.opcfoundation.UA.Boolean",
+      "type": "application/tm+json"
+    },
+    {
+      "rel": "dov:capability",
+      "href": "urn:org.opcfoundation.UA.UInt32",
+      "type": "application/tm+json"
+    }
+  ]
+}

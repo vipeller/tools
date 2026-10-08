@@ -1,0 +1,75 @@
+{
+  "@context": [
+    "https://www.w3.org/2022/wot/td/v1.1",
+    {
+      "dov": "http://azure.com/IoT/operations/tm#",
+      "adr": "http://azure.com/IoT/operations/deviceregistry#",
+      "uav": "http://opcfoundation.org/UA/WoT-Binding/v1.00",
+      "mqv": "http://www.w3.org/2019/wot/mqtt#"
+    }
+  ],
+  "@type": "Thing",
+  "id": "urn:azureiot:aio:opc-simulator:default:CNC-01",
+  "title": "CNC-01",
+  "security": [
+    "nosec_sc"
+  ],
+  "securityDefinitions": {
+    "nosec_sc": {
+      "scheme": "nosec"
+    }
+  },
+  "base": "opc.tcp://opc-simulator.azure-iot-operations.svc.cluster.local:4840",
+  "dov:assetType": "urn:org.opcfoundation.UA.MachineTool.MachineToolType",
+  "dov:deviceMetadata": {
+    "externalDeviceId": "opc-simulator"
+  },
+  "dov:metadata": {
+    "DisplayName": "CNC-01",
+    "Manufacturer": "Acme Machines",
+    "Model": "FiveAxis-5000",
+    "HardwareRevision": "3.1",
+    "SoftwareRevision": "7.2.0",
+    "SerialNumber": "5X-CNC-01"
+  },
+  "links": [
+    {
+      "rel": "tm:submodel",
+      "href": "urn:azureiot:aio:opc-simulator:default:CNC-01:dataset.Objects.CNC-01",
+      "type": "application/td+json"
+    },
+    {
+      "rel": "tm:submodel",
+      "href": "urn:azureiot:aio:opc-simulator:default:CNC-01:actiongroup.Monitoring.Stacklight",
+      "type": "application/td+json"
+    },
+    {
+      "rel": "tm:submodel",
+      "href": "urn:azureiot:aio:opc-simulator:default:CNC-01:actiongroup.Objects.CNC-01",
+      "type": "application/td+json"
+    },
+    {
+      "rel": "dov:capability",
+      "href": "urn:org.opcfoundation.UA.MachineTool.MachineToolType",
+      "type": "application/tm+json"
+    },
+    {
+      "rel": "adr:asset",
+      "href": "urn:azure:iot:adr:uuid:bdcf6a8e-6b02-4c54-8741-e4ddbb7421d1",
+      "anchor": "#"
+    },
+    {
+      "rel": "adr:device",
+      "href": "urn:azure:iot:adr:uuid:056cc98b-5c6d-433a-aaf0-575e67cb1c98",
+      "anchor": "#"
+    },
+    {
+      "rel": "adr:endpoint",
+      "href": "urn:azure:iot:adr:endpoint:opc-simulator.default",
+      "anchor": "#"
+    }
+  ],
+  "version": {
+    "instance": "1"
+  }
+}
