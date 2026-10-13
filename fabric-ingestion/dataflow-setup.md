@@ -77,7 +77,7 @@ metadata:
   name: mq-testing-enrich-graph
   namespace: azure-iot-operations
 spec:
-  profileRef: dataflowdeployment
+  profileRef: default
 
   nodes:
     - nodeType: Source
