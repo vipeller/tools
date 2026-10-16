@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PUMP = "pump-device-integration-server"
 CHART = ROOT / "charts" / PUMP
-PACKAGE = ROOT / "charts" / f"{PUMP}-0.1.1.tgz"
+PACKAGE = ROOT / "charts" / f"{PUMP}-0.1.2.tgz"
 NS = "azure-iot-operations"
 POLICY = "http://opcfoundation.org/UA/SecurityPolicy#"
 ASSET = "nsu=http://opcfoundation.org/UA/Pumps/;i=1052"
@@ -33,7 +33,9 @@ def emit(value):
 if name == "column":
     sys.stdout.write(sys.stdin.read())
 elif name == "helm" and args[0] == "status":
-    sys.exit(0 if state.get("installed") else 1)
+    if not state.get("installed"):
+        sys.exit(1)
+    emit({"info": {"status": state.get("release_status", "deployed")}})
 elif name == "helm" and args[:2] == ["upgrade", "-i"]:
     pass
 elif name == "kubectl" and "get" in args and "svc" in args:
@@ -109,7 +111,7 @@ class ScriptTests(unittest.TestCase):
     def test_default_deploy_encrypted_registration(self):
         output = self.run_script("deploy_pump.sh").stderr
         chart = PACKAGE if PACKAGE.exists() else CHART
-        self.assertEqual(self.calls("helm"), [["status", "-n", NS, "pump"],
+        self.assertEqual(self.calls("helm"), [["status", "-n", NS, "pump", "-o", "json"],
             ["upgrade", "-i", "pump", str(chart), "--namespace", NS, "--create-namespace", "--wait", "--timeout", "300s"]])
         self.assertIn(f"opc.tcp://pump-{PUMP}.{NS}.svc.cluster.local:62542/PumpDeviceIntegrationServer", output)
         hint = shlex.split(output.split("Next step: ", 1)[1].splitlines()[0])
@@ -127,7 +129,7 @@ class ScriptTests(unittest.TestCase):
             "--image", "example/pump@sha256:abc", "--values", values, "--chart", CHART, "--timeout", "42",
             env={"RELEASE": "ignored", "NAMESPACE": "ignored", "PUMP_COUNT": "3", "IMAGE": "ignored",
                  "VALUES_FILE": "ignored", "CHART_PATH": "ignored", "TIMEOUT_SECONDS": "5"}).stderr
-        self.assertEqual(self.calls("helm"), [["status", "-n", "custom", "other"], ["upgrade", "-i", "other", str(CHART),
+        self.assertEqual(self.calls("helm"), [["status", "-n", "custom", "other", "-o", "json"], ["upgrade", "-i", "other", str(CHART),
             "--namespace", "custom", "--create-namespace", "--wait", "--timeout", "42s", "-f", str(values),
             "--set-string", "image=example/pump@sha256:abc", "--set", "pumps=7"]])
         self.assertIn("opc.tcp://actual-service.custom.svc.cluster.local:61234/PumpDeviceIntegrationServer", output)
@@ -145,10 +147,44 @@ class ScriptTests(unittest.TestCase):
     def test_existing_release_skips_install(self):
         self.state["installed"] = True
         output = self.run_script("deploy_pump.sh").stderr
-        self.assertEqual(self.calls("helm"), [["status", "-n", NS, "pump"]])
+        self.assertEqual(self.calls("helm"), [["status", "-n", NS, "pump", "-o", "json"]])
         self.assertEqual(self.calls("kubectl"), [["-n", NS, "get", "svc", "-l", "app.kubernetes.io/instance=pump", "-o", "json"]])
         self.assertIn("already exists", output)
         self.assertIn("--security-mode SignAndEncrypt", output)
+
+    def test_failed_release_requires_explicit_upgrade(self):
+        self.state.update(installed=True, release_status="failed")
+        output = self.run_script("deploy_pump.sh", code=1).stderr
+        self.assertIn("not successfully deployed", output)
+        self.assertIn("--upgrade", output)
+        self.assertEqual(self.calls("helm"), [["status", "-n", NS, "pump", "-o", "json"]])
+        self.assertEqual(self.calls("kubectl"), [])
+
+    def test_upgrade_retries_failed_and_updates_deployed_release(self):
+        values = self.tmp / "overrides.json"
+        values.write_text('{"pumps": 4}')
+        for status in ("failed", "deployed"):
+            with self.subTest(status=status):
+                self.state.update(installed=True, release_status=status)
+                self.run_script("deploy_pump.sh", "--upgrade", "--values", values, "--pumps", "7")
+                args = self.calls("helm")[-1]
+                self.assertEqual(args[:3], ["upgrade", "-i", "pump"])
+                self.assertEqual(args[-5:], ["--reset-then-reuse-values", "-f", str(values), "--set", "pumps=7"])
+                self.assertTrue(any("rollout" in call for call in self.calls("kubectl")))
+
+    def test_upgrade_on_new_release_installs_without_reusing_values(self):
+        self.run_script("deploy_pump.sh", "--upgrade")
+        self.assertNotIn("--reset-then-reuse-values", self.calls("helm")[-1])
+
+    def test_in_progress_releases_are_not_overwritten(self):
+        for status in ("pending-install", "pending-upgrade", "pending-rollback", "uninstalling"):
+            for flags in ((), ("--upgrade",)):
+                with self.subTest(status=status, flags=flags):
+                    self.state.update(installed=True, release_status=status)
+                    output = self.run_script("deploy_pump.sh", *flags, code=1).stderr
+                    self.assertIn("in-progress Helm operation", output)
+                    self.assertEqual(len(self.calls("helm")), 1)
+                    self.assertEqual(self.calls("kubectl"), [])
 
     def test_deploy_warns_when_no_opc_service_is_found(self):
         self.state["services"] = [service("metrics", (("http", 80),))]
@@ -288,7 +324,8 @@ class ChartTests(unittest.TestCase):
             self.assertIn(f"- name: {name}\n              mountPath: /app/pki/trusted/{path}\n              readOnly: true", dep)
         self.assertNotIn("tls.key", dep)
         self.assertNotIn("subPath:", dep)
-        self.assertNotIn("optional: true", dep)
+        self.assertEqual(dep.count("optional: true"), 2)
+        self.assertNotIn("optional: false", dep)
 
     def test_aio_connector_trust_can_be_overridden_or_disabled(self):
         dep = self.document(self.render("--set", "connectorTrust.caSecretName=custom-ca,connectorTrust.caCertificateKey=ca.pem,connectorTrust.crlSecretName=custom-crl,connectorTrust.crlKey=current.crl"), "Deployment")
@@ -299,6 +336,13 @@ class ChartTests(unittest.TestCase):
         self.assertNotIn("connector-ca", disabled)
         self.assertNotIn("connector-crl", disabled)
         self.assertIn("mountPath: /app/pki", disabled)
+
+    def test_aio_connector_trust_can_require_secrets_for_gds_clusters(self):
+        dep = self.document(self.render("--set", "connectorTrust.requireSecrets=true"), "Deployment")
+        self.assertEqual(dep.count("optional: false"), 2)
+        self.assertNotIn("optional: true", dep)
+        self.assertIn('secretName: "aio-opc-ua-gds-ca-cert"', dep)
+        self.assertIn('key: "aio-opc-ua-gds-ca.crl"', dep)
 
     def test_enabled_aio_connector_trust_requires_secret_names_and_keys(self):
         for field in ("caSecretName", "caCertificateKey", "crlSecretName", "crlKey"):
@@ -327,7 +371,8 @@ class ChartTests(unittest.TestCase):
     def test_package_matches_source_rendering(self):
         for flags in ((), ("--set", "image=example/pump:pinned,pumps=7,service.port=61234,fullnameOverride=custom"),
                       ("--set", "persistence.enabled=true"), ("--set", "persistence.enabled=true,persistence.existingClaim=shared"),
-                                            ("--set", "connectorTrust.enabled=false"), ("--set", "connectorTrust.caSecretName=custom-ca,connectorTrust.crlSecretName=custom-crl")):
+                      ("--set", "connectorTrust.enabled=false"), ("--set", "connectorTrust.requireSecrets=true"),
+                      ("--set", "connectorTrust.caSecretName=custom-ca,connectorTrust.crlSecretName=custom-crl")):
             with self.subTest(flags=flags):
                 self.assertEqual(self.render(*flags, chart=PACKAGE), self.render(*flags))
 

@@ -23,9 +23,12 @@ persistence:
 # Trust the AIO connector's issuing CA and check its revocation list.
 # Project only public keys; never mount the CA secret's tls.key.
 # Mount directories (not subPath files) so kubelet can refresh rotated material.
-# Set enabled=false only for standalone use with a separately managed trust store.
+# Clusters using self-signed connector certificates may have no GDS CA or CRL.
+# Optional projections let the server start there without disabling validation.
+# CA-issued clients still require a matching CA/CRL to pass validation.
 connectorTrust:
   enabled: true
+  requireSecrets: false
   caSecretName: aio-opc-ua-gds-ca-cert
   caCertificateKey: tls.crt
   crlSecretName: aio-opc-ua-gds-ca-crl

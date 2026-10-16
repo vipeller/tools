@@ -87,12 +87,14 @@ spec:
         - name: connector-ca
           secret:
             secretName: {{ required "connectorTrust.caSecretName is required" .Values.connectorTrust.caSecretName | quote }}
+            optional: {{ not .Values.connectorTrust.requireSecrets }}
             items:
               - key: {{ required "connectorTrust.caCertificateKey is required" .Values.connectorTrust.caCertificateKey | quote }}
                 path: aio-gds-ca.pem
         - name: connector-crl
           secret:
             secretName: {{ required "connectorTrust.crlSecretName is required" .Values.connectorTrust.crlSecretName | quote }}
+            optional: {{ not .Values.connectorTrust.requireSecrets }}
             items:
               - key: {{ required "connectorTrust.crlKey is required" .Values.connectorTrust.crlKey | quote }}
                 path: aio-gds-ca.crl

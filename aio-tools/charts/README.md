@@ -23,7 +23,7 @@ Bump `aio-tools/charts/`'s entry in `bootstrap.sh` and the
 the new file name (the chart's `Chart.yaml` `version` is the source
 of truth for the file name).
 
-## `pump-device-integration-server-0.1.1.tgz`
+## `pump-device-integration-server-0.1.2.tgz`
 
 A package of our **local** chart in `pump-device-integration-server/`,
 used by `deploy_pump.sh` and downloaded by `bootstrap.sh`. The source
@@ -73,16 +73,32 @@ it mounts only the public `tls.crt` key from `aio-opc-ua-gds-ca-cert`
 as `/app/pki/trusted/certs/aio-gds-ca.pem`, and the DER
 `aio-opc-ua-gds-ca.crl` key from `aio-opc-ua-gds-ca-crl` as
 `/app/pki/trusted/crl/aio-gds-ca.crl`. It never mounts `tls.key`.
-The Secrets must exist in the release namespace. Both directories are
-read-only Secret mounts without `subPath`, so Kubernetes Secret refreshes
-are visible to the upstream certificate store rather than being copied
-only at startup. Revocation checking remains enabled.
+Both directories are read-only Secret mounts without `subPath`, so
+Kubernetes Secret refreshes are visible to the upstream certificate store
+rather than being copied only at startup. Revocation checking remains
+enabled.
 
 The `connectorTrust` values allow changing the Secret names and data keys.
 The certificate must be PEM and the CRL must be DER, matching the standard
 AIO Secrets. Set `connectorTrust.enabled: false` only when using a
 separately managed trust store, such as a standalone simulator setup.
 See the upgrade command and diagnosis in [`../README.md`](../README.md).
+
+### Clusters without GDS
+
+Version `0.1.2` makes both Secret projections optional by default. AIO
+clusters using self-signed connector certificates can have no GDS CA
+Secret and an empty CRL Secret. Version `0.1.1` would leave their pump pod
+stuck in `ContainerCreating` with `FailedMount` errors before the server
+could start. Optional projections allow startup and refresh automatically
+if the files appear later. This does not suppress certificate validation
+or missing-CRL errors for CA-issued clients.
+
+Set `connectorTrust.requireSecrets: true` to restore required mounts on a
+GDS-configured cluster. Secret names and public data keys remain configurable.
+Use `./deploy_pump.sh --upgrade` (Helm 3.14+) to retry an existing failed
+release or apply this chart, retaining saved user overrides such as pump
+count. The script refuses to overwrite an in-progress Helm operation.
 
 ### Reproducing the package
 

@@ -196,7 +196,7 @@ copy of `OPC-Simulator/deploy/helm/opc-simulator`).
   if your `--release` already contains the substring `opc-simulator`,
   it's the service name; otherwise it's `<release>-opc-simulator`.
 
-### `deploy_pump.sh [--release <name>] [--namespace <ns>] [--image <ref>] [--pumps N] [--chart <path>] [--values <yaml>] [--timeout <secs>]`
+### `deploy_pump.sh [--release <name>] [--namespace <ns>] [--image <ref>] [--pumps N] [--chart <path>] [--values <yaml>] [--timeout <secs>] [--upgrade]`
 
 Deploys one OPC Foundation PumpDeviceIntegrationServer per Helm
 release, containing multiple pumps (not one Pod per pump).
@@ -213,7 +213,7 @@ release, containing multiple pumps (not one Pod per pump).
   of **1–100**. Use another release name for a separate server.
 * Chart resolution order:
   1. Explicit `--chart` / `CHART_PATH` (chart directory or `.tgz`).
-  2. Vendored `charts/pump-device-integration-server-0.1.1.tgz`
+  2. Vendored `charts/pump-device-integration-server-0.1.2.tgz`
      beside the script (downloaded by `bootstrap.sh`).
   3. Local source directory `charts/pump-device-integration-server`.
   There is no upstream Helm chart or remote-chart fallback.
@@ -221,6 +221,11 @@ release, containing multiple pumps (not one Pod per pump).
   and `pumps` values are preserved unless the corresponding flag or
   environment variable is explicitly supplied.
   `--timeout` / `TIMEOUT_SECONDS` sets the Helm wait budget in seconds.
+* Existing deployed releases are left alone unless `--upgrade` is supplied.
+  A failed release is reported as an error, with a hint to retry using
+  `--upgrade`. Upgrades require Helm 3.14+ and apply new chart defaults,
+  then the release's saved user overrides, then the supplied values/flags.
+  In-progress Helm operations are never overwritten.
 * Persistence is **disabled** by default: `/app/pki` uses `emptyDir`,
   so Pod replacement loses certificates and trust state. To persist
   PKI, set `persistence.enabled: true` in a values file. The chart
@@ -230,13 +235,17 @@ release, containing multiple pumps (not one Pod per pump).
 * The chart mounts the AIO connector's **public issuing CA certificate**
   (`tls.crt` from Secret `aio-opc-ua-gds-ca-cert`) and **DER CRL**
   (`aio-opc-ua-gds-ca.crl` from Secret `aio-opc-ua-gds-ca-crl`) into
-  `/app/pki/trusted/certs` and `/app/pki/trusted/crl`. These Secrets must
-  exist in the pump's namespace. No CA private key is mounted.
+  `/app/pki/trusted/certs` and `/app/pki/trusted/crl`. No CA private key is
+  mounted. Since chart `0.1.2`, the Secret projections are **optional**:
+  clusters using self-signed connector certificates can start the pump
+  without GDS Secrets, or with an empty CRL Secret. This does not disable
+  certificate or revocation validation; CA-issued client certificates
+  still need their matching CA/CRL. Set `connectorTrust.requireSecrets: true`
+  to require the files at startup on GDS-configured clusters.
   Directory mounts allow Kubernetes to refresh the files when Secrets
   change; the upstream store reloads them. Override `connectorTrust`
   names/keys in a values file for different AIO installations. For
-  standalone use with separately managed trust, set
-  `connectorTrust.enabled: false`.
+  separately managed trust stores, set `connectorTrust.enabled: false`.
 * Upstream generates its application certificate with `O=OPC Foundation`.
   Unlike the umati fork, this chart does not rewrite certificate subjects
   to `O=Microsoft`. Clusters enforcing that organization policy need
@@ -397,7 +406,7 @@ update_connector_image.sh # swap the OPC UA Commander image (dev builds)
 update_dataflow_image.sh  # swap the dataflow operator image (dev builds)
 charts/                   # vendored Helm chart packages + local pump source
 charts/pump-device-integration-server/           # tracked local chart source
-charts/pump-device-integration-server-0.1.1.tgz  # package used by bootstrap
+charts/pump-device-integration-server-0.1.2.tgz  # package used by bootstrap
 README.md                 # this file
 ```
 
@@ -503,7 +512,28 @@ parity. Live AIO connector discovery still requires your cluster.
 
 ---
 
-## Pump connector certificate troubleshooting
+## Pump deployment and certificate troubleshooting
+
+If the pod is stuck in `ContainerCreating`, inspect its events:
+
+```bash
+kubectl describe pod -n azure-iot-operations \
+    -l app.kubernetes.io/name=pump-device-integration-server
+```
+
+Chart `0.1.1` required the GDS CA and CRL Secret files at startup. On
+clusters using a self-signed connector certificate, the CA Secret can be
+absent and the CRL Secret empty, causing `FailedMount` events. Chart
+`0.1.2` makes these projections optional without weakening validation.
+After updating the tools/chart, retry the failed release from `aio-tools/`:
+
+```bash
+./deploy_pump.sh --upgrade
+```
+
+This preserves saved user overrides, such as `pumps: 1`. For GDS-based
+client certificates, missing CA/CRL files still need provisioning before
+secure connections can succeed. Optional mounts are not a trust bypass.
 
 `Could not verify security on OpenSecureChannel request` is a generic
 server-side rejection. Check the **pump logs**, not just connector logs:
@@ -522,14 +552,15 @@ AIO GDS public CA and CRL while retaining revocation checking.
 To update a previously deployed `pump` release, run from `aio-tools/`:
 
 ```bash
-helm upgrade pump charts/pump-device-integration-server-0.1.1.tgz \
-    --namespace azure-iot-operations --wait --timeout 300s
+helm upgrade pump charts/pump-device-integration-server-0.1.2.tgz \
+    --namespace azure-iot-operations --reset-then-reuse-values \
+    --wait --timeout 300s
 ```
 
-Reapply any custom image, pump-count, or persistence values with `-f` /
-`--set` when upgrading. `deploy_pump.sh` intentionally leaves existing
-releases alone. No device re-registration is needed if the endpoint
-and security settings are unchanged; the connector retries the connection.
+This command (Helm 3.14+) preserves saved user overrides; pass `-f` /
+`--set` to change them. Alternatively, use `./deploy_pump.sh --upgrade`.
+No device re-registration is needed if the endpoint and security settings
+are unchanged; the connector retries the connection.
 
 The projected files must contain the matching PEM issuing CA certificate
 and a current, signed DER CRL. If the CA/CRL Secret names differ or the
@@ -546,6 +577,8 @@ than disabling encryption or revocation checks.
 * **Helm release "already exists"** — the deploy scripts are
   idempotent on purpose. Delete the release with
   `helm uninstall -n <ns> <release>` if you really want to redeploy.
+  For the pump, use `./deploy_pump.sh --upgrade` to update/retry in place
+  without uninstalling.
 * **`az iot ops show` fails** — install/refresh the `azure-iot-ops`
   CLI extension manually:
   `az extension add -n azure-iot-ops -y`.

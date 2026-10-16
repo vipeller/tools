@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # deploy_pump.sh — install one OPC Foundation PumpDeviceIntegrationServer
-# per Helm release. Existing releases are reported and left alone.
+# per Helm release. Existing releases are left alone unless --upgrade is given.
 # Upstream provides a container and Kubernetes manifest, not a pump chart;
 # the chart in charts/ is maintained here. See charts/README.md for provenance.
 #
@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/common.sh"
 
 DEFAULT_IMAGE="ghcr.io/opcfoundation/uanetstandard/pumpserver:latest-master"
-DEFAULT_CHART_FILE="pump-device-integration-server-0.1.1.tgz"
+DEFAULT_CHART_FILE="pump-device-integration-server-0.1.2.tgz"
 DEFAULT_CHART_LOCAL="${SCRIPT_DIR}/charts/${DEFAULT_CHART_FILE}"
 DEFAULT_CHART_DIR="${SCRIPT_DIR}/charts/pump-device-integration-server"
 RELEASE="${RELEASE:-pump}"
@@ -26,6 +26,7 @@ CHART_PATH="${CHART_PATH:-}"
 VALUES_FILE="${VALUES_FILE:-}"
 PUMP_COUNT="${PUMP_COUNT:-}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-300}"
+UPGRADE=0
 
 usage() {
   cat <<EOF >&2
@@ -39,6 +40,8 @@ Options:
   -f, --values <file>     Extra Helm values file (-f).
       --pumps <count>     Pump instances per server, 1..100 (chart default: 2).
   -t, --timeout <secs>    Helm wait timeout (default: 300).
+      --upgrade           Upgrade/retry an existing release, preserving its
+                          overrides (requires Helm 3.14+).
   -h, --help              Show this help.
 
 Environment (lower precedence than flags):
@@ -49,9 +52,11 @@ The upstream default image follows master. Pin --image <tag-or-digest> for
 repeatable deployments. Values-file image/pumps are used unless overridden
 by the corresponding flag or environment variable.
 
-The default chart mounts the AIO OPC UA CA certificate and CRL from
-Secrets aio-opc-ua-gds-ca-cert and aio-opc-ua-gds-ca-crl in this namespace.
-Override connectorTrust in --values if your Secret names differ.
+The default chart optionally mounts the AIO OPC UA CA certificate and CRL
+from Secrets aio-opc-ua-gds-ca-cert and aio-opc-ua-gds-ca-crl. Clusters using
+self-signed connector certificates may not have these files. Certificate
+and revocation validation remain enabled. Override connectorTrust in
+--values for other Secret names or set requireSecrets=true for strict mounts.
 EOF
 }
 
@@ -71,6 +76,7 @@ while [[ $# -gt 0 ]]; do
         -t|--timeout)   TIMEOUT_SECONDS="$2" ;;
       esac
       shift 2 ;;
+       --upgrade) UPGRADE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) err "Unknown argument: $1"; usage; exit 2 ;;
   esac
@@ -110,10 +116,26 @@ show_endpoint() {
   done <<< "$rows"
 }
 
-if helm status -n "$NAMESPACE" "$RELEASE" >/dev/null 2>&1; then
-  ok "Helm release '$RELEASE' already exists in namespace '$NAMESPACE' — nothing to do."
-  show_endpoint
-  exit 0
+RELEASE_EXISTS=0
+if RELEASE_JSON="$(helm status -n "$NAMESPACE" "$RELEASE" -o json 2>/dev/null)"; then
+  RELEASE_EXISTS=1
+  RELEASE_STATUS="$(jq -r '.info.status // "unknown"' <<< "$RELEASE_JSON")"
+  case "$RELEASE_STATUS" in
+    pending-*|uninstalling)
+      err "Helm release '$RELEASE' is '$RELEASE_STATUS'; resolve the in-progress Helm operation first."
+      exit 1 ;;
+  esac
+  if [[ "$UPGRADE" -eq 0 ]]; then
+    if [[ "$RELEASE_STATUS" != "deployed" ]]; then
+      err "Helm release '$RELEASE' exists but is '$RELEASE_STATUS' — it is not successfully deployed."
+      err "Retry with ./deploy_pump.sh --release $RELEASE --namespace $NAMESPACE --upgrade"
+      exit 1
+    fi
+    ok "Helm release '$RELEASE' already exists in namespace '$NAMESPACE' — nothing to do."
+    log "Use --upgrade to apply chart or values changes."
+    show_endpoint
+    exit 0
+  fi
 fi
 
 # Explicit local chart, then vendored package, then the tracked chart source.
@@ -139,6 +161,9 @@ HELM_ARGS=(
   --namespace "$NAMESPACE" --create-namespace
   --wait --timeout "${TIMEOUT_SECONDS}s"
 )
+# Apply new chart defaults, then saved release overrides, then caller overrides.
+# Plain --reuse-values would retain stale defaults from the previous chart.
+[[ "$RELEASE_EXISTS" -eq 1 ]] && HELM_ARGS+=(--reset-then-reuse-values)
 [[ -n "$VALUES_FILE" ]] && HELM_ARGS+=(-f "$VALUES_FILE")
 [[ -n "$IMAGE" ]] && HELM_ARGS+=(--set-string "image=${IMAGE}")
 [[ -n "$PUMP_COUNT" ]] && HELM_ARGS+=(--set "pumps=${PUMP_COUNT}")
